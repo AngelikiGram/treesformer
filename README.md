@@ -2,7 +2,7 @@
 
 This repository contains the complete implementation of **TreesFormer**, a deep learning framework for reconstructing hierarchical 3D tree structures (represented as L-systems) directly from sparse top-down geodata using only a single orthophoto and its corresponding Digital Surface Model (DSM).
 
-All the material and qualitative results can be seen through in: [TreesFormer](https://drive.google.com/file/d/1zVpkl4hREym_-UoGFSODrlAYETtT8Qcl/view)
+All the material and qualitative results can be seen through in: [TreesFormer](https://angelikigram.github.io/treesformer/)
 .
 
 ## Pretrained Model Weights
