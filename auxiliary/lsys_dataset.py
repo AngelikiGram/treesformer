@@ -12,14 +12,22 @@ from auxiliary.lsys_tokenizer import TokenType, NUM_TYPES, GRAMMAR_MATRIX, compu
 
 
 def normalize_to_unit_cube(points):
-    min_coord = points.min(axis=0)
-    max_coord = points.max(axis=0)
-    center = (max_coord + min_coord) / 2.0
-    points_centered = points - center
-    extent = (max_coord - min_coord).max()
-    scale = float(extent) + 1e-6
-    normalized = (points_centered / scale) * 2.0
-    return normalized.astype(np.float32), center.astype(np.float32), scale
+    if isinstance(points, torch.Tensor):
+        min_coord = points.min(dim=0)[0]
+        max_coord = points.max(dim=0)[0]
+        center = (max_coord + min_coord) / 2.0
+        extent = (max_coord - min_coord).max()
+        scale = float(extent) + 1e-6
+        normalized = (points - center) / (scale / 2.0)
+        return normalized, center, scale
+    else:
+        min_coord = points.min(axis=0)
+        max_coord = points.max(axis=0)
+        center = (max_coord + min_coord) / 2.0
+        extent = (max_coord - min_coord).max()
+        scale = float(extent) + 1e-6
+        normalized = ((points - center) / scale) * 2.0
+        return normalized.astype(np.float32), center.astype(np.float32), scale
 
 def pad_to_length(arr, length, pad_value):
     arr = np.array(arr)
@@ -465,13 +473,8 @@ class LSystemDataset(Dataset):
         
         # ✅ STRICT NORMALIZATION Mode (for cross-sensor consistency)
         if self.normalize and dsm_norm.shape[0] > 0:
-            # 1. DSM: Force strictly into [-1, 1] unit cube based on THIS sample's bounds
-            # This makes the model invariant to absolute scale errors in foreign datasets
-            p_min = dsm_norm.min(dim=0)[0]
-            p_max = dsm_norm.max(dim=0)[0]
-            p_center = (p_min + p_max) / 2.0
-            p_extent = (p_max - p_min).max()
-            dsm_norm = (dsm_norm - p_center) / (p_extent / 2.0 + 1e-9)
+            # Force strictly into [-1, 1] unit cube using the helper function
+            dsm_norm, _, _ = normalize_to_unit_cube(dsm_norm)
         
         
         # ✅ DSM AUGMENTATION (Training only)

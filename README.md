@@ -1,5 +1,18 @@
+# Treesformer: Multimodal Grammar-Based 3D Tree Reconstruction from Sparse Geodata
 
-# Treesformer: L-System Tree Generation
+This repository contains the complete implementation of **TreesFormer**, a deep learning framework for reconstructing hierarchical 3D tree structures (represented as L-systems) directly from sparse top-down geodata using only a single orthophoto and its corresponding Digital Surface Model (DSM).
+
+All the material and qualitative results can be seen through in: [TreesFormer](https://drive.google.com/file/d/1zVpkl4hREym_-UoGFSODrlAYETtT8Qcl/view)
+.
+
+## Pretrained Model Weights
+
+Pretrained model weights are available for download from Google Drive:
+
+[Download pretrained model weights (Google Drive)](https://drive.google.com/file/d/1zVpkl4hREym_-UoGFSODrlAYETtT8Qcl/view)
+
+After downloading, place the extracted folder `treesformer_weights` inside the `models/` directory:
+`models/treesformer_weights/`
 
 ## Project Structure
 
