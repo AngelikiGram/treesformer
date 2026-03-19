@@ -3,3 +3,12 @@ results/
 inference_data/*
 
 __pycache__/
+
+README_MINE.md
+ 
+evaluate_treesformer.py
+evaluate_shared.py
+
+*.pth
+
+network.pth

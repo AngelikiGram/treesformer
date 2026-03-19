@@ -449,7 +449,7 @@ class FullMultimodalEncoder(nn.Module):
     - Downsample from 2549 tokens to ~256 tokens
     - 10x reduction in cross-attention memory
     """
-    def __init__(self, dim=512, visual_bottleneck=640, visual_dropout=0.1, num_species=30):
+    def __init__(self, dim=512, visual_bottleneck=640, visual_dropout=0.05, num_species=30):
         super().__init__()
         self.visual_dropout = visual_dropout
         self.dim = dim
@@ -493,8 +493,6 @@ class FullMultimodalEncoder(nn.Module):
             nn.Linear(dim, dim)
         )
         self.visual_bottleneck = visual_bottleneck
-        
-        self.visual_bottleneck = visual_bottleneck
 
     def forward(self, dsm_pts, ortho_img):
         B = ortho_img.shape[0]
@@ -510,18 +508,16 @@ class FullMultimodalEncoder(nn.Module):
         # Forces model to learn identifying species from geometry alone in 20% of batches.
         if self.training and not ortho_is_missing and not dsm_is_missing:
             r = random.random()
-            if r < 0.2:
-                ortho_is_missing = True # Drop Ortho
-            elif r < 0.4:
-                dsm_is_missing = True   # Drop DSM
+            if r < 0.1:
+                ortho_is_missing = True # Drop Ortho (10%)
+            elif r < 0.2:
+                dsm_is_missing = True   # Drop DSM (10%)
         
 
         # 1. Process Orthophoto if available
         if not ortho_is_missing:
-            # Robust Internal Normalization
-            if ortho_img.max() <= 1.01:
-                ortho_img = (ortho_img - self.mean) / self.std
-            
+            # 🔴 FIX: The dataset already applies ImageNet normalization in img_tf.
+            # Do NOT re-normalize here. The domain_adapter runs on already-normalized data.
             # Learnable Domain Adapter
             ortho_img = self.domain_adapter(ortho_img)
 
@@ -572,8 +568,8 @@ class FullMultimodalEncoder(nn.Module):
         anchor = self.anchor_proj(global_feat).unsqueeze(1)  # (B, 1, dim)
         
         if self.training:
-            # Drop the anchor entirely for 20% of the batch to force geometry-dependence
-            anchor_mask = (torch.rand(B, 1, 1, device=device) > 0.2).float()
+            # Drop the anchor entirely for 10% of the batch to force geometry-dependence
+            anchor_mask = (torch.rand(B, 1, 1, device=device) > 0.1).float()
             anchor = anchor * anchor_mask
             
             # Add a tiny bit of Gaussian noise to the anchor to encourage structural diversity
@@ -1002,6 +998,9 @@ class LSystemModel(nn.Module):
         # State tracking
         bracket_depth = torch.zeros(B, dtype=torch.long, device=device)
         finished      = torch.zeros(B, dtype=torch.bool, device=device)
+        steps_since_f = torch.zeros(B, dtype=torch.long, device=device)
+        f_at_depth    = torch.zeros((B, 33), dtype=torch.bool, device=device)
+        f_at_depth[:, 0] = True # Starting Axiom F is at depth 0
         
         # KV cache slots: backbone + structural decoder layers
         n_backbone = len(self.blocks)
@@ -1078,6 +1077,19 @@ class LSystemModel(nn.Module):
             logits_t[:, TokenType.LBR] = logits_t[:, TokenType.LBR].masked_fill(bracket_depth >= max_depth, float('-inf'))
             logits_t[:, TokenType.EOS] = logits_t[:, TokenType.EOS].masked_fill(bracket_depth > 0, float('-inf'))
             
+            # 🔴 MOVEMENT PRESSURE: Force F if stuck in non-moving loops
+            stuck_mask = steps_since_f > 5
+            logits_t[stuck_mask, TokenType.F] += 5.0
+            
+            # 🔴 STRUCTURAL RULE: Cannot close branch if no F was emitted in it
+            current_f_at_depth = f_at_depth.gather(1, bracket_depth.unsqueeze(1)).squeeze(1)
+            no_closing_mask = (bracket_depth > 0) & (~current_f_at_depth)
+            logits_t[no_closing_mask, TokenType.RBR] = float('-inf')
+            
+            # 🔴 EOS Guard: Must have F at root level
+            no_eos_mask = ~f_at_depth[:, 0]
+            logits_t[no_eos_mask, TokenType.EOS] = float('-inf')
+            
             logits_t = torch.clamp(logits_t, -100, 100)
             
             # Choose temperature per sample
@@ -1096,10 +1108,27 @@ class LSystemModel(nn.Module):
             next_t = torch.multinomial(probs_t, 1) # (B, 1)
             
             # Update sequence state
-            bracket_depth += (next_t == TokenType.LBR).long().view(-1)
-            bracket_depth -= (next_t == TokenType.RBR).long().view(-1)
-            finished      |= (next_t == TokenType.EOS).view(-1)
-            finished      |= (next_t == TokenType.PAD).view(-1)
+            next_t_flat = next_t.view(-1)
+            is_f = (next_t_flat == TokenType.F)
+            is_lbr = (next_t_flat == TokenType.LBR)
+            is_rbr = (next_t_flat == TokenType.RBR)
+            
+            if is_f.any():
+                f_at_depth[is_f, bracket_depth[is_f]] = True
+                
+            steps_since_f[is_f] = 0
+            steps_since_f[~is_f & ~finished] += 1
+            
+            bracket_depth += is_lbr.long()
+            if is_lbr.any():
+                safe_depth = torch.clamp(bracket_depth, max=32)
+                f_at_depth[is_lbr, safe_depth[is_lbr]] = False
+                
+            bracket_depth -= is_rbr.long()
+            bracket_depth = torch.clamp(bracket_depth, min=0)
+            
+            finished |= (next_t_flat == TokenType.EOS)
+            finished |= (next_t_flat == TokenType.PAD)
             
             # Sample values
             next_vals = torch.zeros((B, 1, 3), dtype=torch.long, device=device)
@@ -1355,9 +1384,25 @@ class LSystemModel(nn.Module):
         all_new_caches = new_backbone_caches + new_struct_caches
         # Return (visual_memory, global_feat) as the visual cache for next chunks
         return type_logits, val_logits, species_logits, all_new_caches, (visual_memory, global_feat, species_logits), pred_state
-    
+
     @torch.no_grad()
     def generate(self, dsm_pts, ortho_img, tokenizer, max_len=1000, temperature=1.0, temperature_structural=0.7, max_depth=20):
+        """
+        Legacy string-based generation endpoint (Now dramatically accelerated!).
+        Wraps the vectorized, batched pure_inference method and converts to string formats.
+        """
+        types_batch, vals_batch = self.pure_inference(
+            dsm_pts, ortho_img, tokenizer,
+            max_len=max_len,
+            temperature=temperature,
+            temperature_structural=temperature_structural,
+            max_depth=max_depth
+        )
+        # Return string of the first predicted batch item
+        return tokenizer.decode(types_batch[0], vals_batch[0])
+    
+    @torch.no_grad()
+    def generate1(self, dsm_pts, ortho_img, tokenizer, max_len=1000, temperature=1.0, temperature_structural=0.7, max_depth=20):
         """
         BRACKET-SAFE Generation with KV Caching for 10-30x speedup
         
@@ -1818,7 +1863,7 @@ def train_model(
         factor=0.5,
         patience=20,     # 10 was too aggressive; allow enough epochs to learn
         verbose=True,
-        min_lr=1e-10      # Lower floor for fine-tuning
+        min_lr=1e-6       # 🔴 FIX: 1e-10 is effectively zero and stalls training
     )
     
     scaler = torch.amp.GradScaler('cuda')
@@ -2037,7 +2082,7 @@ def train_model(
             valid_sp = sp_gt >= 0
             if valid_sp.any():
                 # ✅ ADDED: label_smoothing=0.1 to avoid over-confidence and reduce template collapse
-                loss_sp = 5.0 * F.cross_entropy(sp_logits[valid_sp], sp_gt[valid_sp], label_smoothing=0.1)
+                loss_sp = F.cross_entropy(sp_logits[valid_sp], sp_gt[valid_sp], label_smoothing=0.1)
             else:
                 loss_sp = torch.tensor(0.0, device=device, dtype=sp_logits.dtype)
 
@@ -2077,7 +2122,7 @@ def train_model(
             
             # Apply position weights
             weighted_loss = loss_per_token * pos_weights_flat[valid_flat]
-            loss_type = 10*weighted_loss.mean()
+            loss_type = weighted_loss.mean()
 
             # --------------------------------------------------
             # POSITION-WEIGHTED VALUE LOSS
@@ -2237,10 +2282,10 @@ def train_model(
             # --------------------------------------------------
             # FINAL LOSS
             # --------------------------------------------------
-            # species weight 0.2 → 0.02: species CE was dominating the visual encoder gradient
-            # and pushing it toward per-species templates.  Structural losses should drive
-            # visual encoding of individual tree geometry.
-            loss = loss_type + 10.0 * loss_val + 0.02 * loss_sp
+            # 🔴 FIX: Removed double 10× on type loss (was at loss_type computation + here).
+            # Rebalanced so visual grounding and geometric losses can compete fairly.
+            # Species weight kept moderate — not too high (templates), not too low (ignored).
+            loss = loss_type + 5.0 * loss_val + 0.1 * loss_sp
 
             # Rotation smoothness: weight kept near-zero because absolute
             # spherical directions don't require consecutive-segment smoothness
@@ -2420,7 +2465,33 @@ def generate_example(model, tokenizer, dsm, ortho, device="cuda"):
 
 
 if __name__ == "__main__":
-    import argparse, os
+    import argparse, os, re
+
+    def auto_detect_bins(lstrings_dir, current_f, current_theta, current_phi):
+        max_f, max_theta, max_phi = 0, 0, 0
+        re_SEGMENT = re.compile(r"([BSbs])(\d+)_(\d+)[F_]?(\d+)")
+        if not os.path.exists(lstrings_dir):
+            return current_f, current_theta, current_phi
+            
+        print(f"[INFO] Auto-detecting bin sizes from data in {lstrings_dir}...")
+        for f_name in os.listdir(lstrings_dir):
+            if f_name.endswith(".txt"):
+                try:
+                    with open(os.path.join(lstrings_dir, f_name), "r", encoding="utf-8") as file:
+                        matches = re_SEGMENT.findall(file.read())
+                        for m in matches:
+                            theta, phi, f_val = int(m[1]), int(m[2]), int(m[3])
+                            if theta > max_theta: max_theta = theta
+                            if phi > max_phi: max_phi = phi
+                            if f_val > max_f: max_f = f_val
+                except Exception as e:
+                    pass
+        
+        # Bins required = max_index + 1
+        new_f = max(current_f, max_f + 1)
+        new_theta = max(current_theta, max_theta + 1)
+        new_phi = max(current_phi, max_phi + 1)
+        return new_f, new_theta, new_phi
 
     parser = argparse.ArgumentParser(description="Train L-System model with geometric stability fixes")
     parser.add_argument("--lstrings_path", type=str, default="LSTRINGS_FINAL") # SYMBOLIC_LSTRINGS_d3
@@ -2428,7 +2499,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_trees", type=int, default=450)
     parser.add_argument("--base", type=str, default="/home/grammatikakis1/TREES_DATASET_SIDE")
 
-    parser.add_argument("--window", type=int, default=1024)
+    parser.add_argument("--window", type=int, default=700)
     parser.add_argument("--batch", type=int, default=16)
     parser.add_argument("--epochs", type=int, default=1500)
     parser.add_argument("--resume", type=str, default=None, help="Path to checkpoint to resume from")
@@ -2471,9 +2542,9 @@ if __name__ == "__main__":
     parser.add_argument("--student_forcing", action="store_true",
                         help="Enable 100% student forcing (autonomous generation during training)")
 
-    parser.add_argument("--f_bins", type=int, default=12, help="Number of bins for F")
-    parser.add_argument("--theta_bins", type=int, default=12, help="Number of bins for Theta")
-    parser.add_argument("--phi_bins", type=int, default=15, help="Number of bins for Phi")
+    parser.add_argument("--f_bins", type=int, default=10, help="Number of bins for F (auto-detected from data)")
+    parser.add_argument("--theta_bins", type=int, default=12, help="Number of bins for Theta (auto-detected from data)")
+    parser.add_argument("--phi_bins", type=int, default=12, help="Number of bins for Phi (auto-detected from data)")
     parser.add_argument("--modality", type=str, default="both", choices=["both", "dsm", "ortho"])
 
     args = parser.parse_args()
@@ -2485,6 +2556,22 @@ if __name__ == "__main__":
     BASE = args.base
 
     lstrings_path = args.lstrings_path
+    full_lstrings_dir = os.path.join(BASE, lstrings_path)
+
+    # --- AUTO-DETECT BINS FROM DATA ---
+    f_bins, theta_bins, phi_bins = auto_detect_bins(
+        full_lstrings_dir, args.f_bins, args.theta_bins, args.phi_bins
+    )
+    if f_bins != args.f_bins:
+        print(f"[INFO] Data auto-override f_bins: {args.f_bins} -> {f_bins}")
+    if theta_bins != args.theta_bins:
+        print(f"[INFO] Data auto-override theta_bins: {args.theta_bins} -> {theta_bins}")
+    if phi_bins != args.phi_bins:
+        print(f"[INFO] Data auto-override phi_bins: {args.phi_bins} -> {phi_bins}")
+    args.f_bins = f_bins
+    args.theta_bins = theta_bins
+    args.phi_bins = phi_bins
+    # ----------------------------------
 
     # --------------------------------------------------------
     # Select IDs  (10 % val split by tree ID, not by window)
@@ -2505,7 +2592,8 @@ if __name__ == "__main__":
         for hid in held_out_ids:
             f.write(f"{hid}\n")
 
-    print(f"[INFO] Train trees: {len(ids)}")
+    print(f"[INFO] Train trees ({len(ids)}):")
+    print(", ".join(ids))
     print(f"[INFO] Held-out trees saved to {held_out_file} (Count: {len(held_out_ids)})")
     print(f"[INFO] Stability features:")
     print(f"  - Bracket-safe generation: ENABLED (always on)")

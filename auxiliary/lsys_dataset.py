@@ -278,7 +278,7 @@ class LSystemDataset(Dataset):
                 
                 self.data[tid] = {
                     "types": np.array(types, dtype=np.int64),
-                    "vals": np.array(vals, dtype=np.float32),
+                    "vals": np.array(vals, dtype=np.int64),
                     "depth": np.array(compute_depth_sequence(types), dtype=np.float32),
                     "bdist": np.array(compute_bracket_distance(types), dtype=np.float32),
                     "species": self.tid_to_species.get(tid, -1),
@@ -289,7 +289,7 @@ class LSystemDataset(Dataset):
                 # No L-string available (Inference mode)
                 self.data[tid] = {
                     "types": np.array([TokenType.F], dtype=np.int64),
-                    "vals": np.array([[0,0,0]], dtype=np.float32),
+                    "vals": np.array([[0,0,0]], dtype=np.int64),
                     "depth": np.array([0], dtype=np.float32),
                     "bdist": np.array([0], dtype=np.float32),
                     "species": self.tid_to_species.get(tid, -1),
@@ -474,31 +474,24 @@ class LSystemDataset(Dataset):
         # ✅ STRICT NORMALIZATION Mode (for cross-sensor consistency)
         if self.normalize and dsm_norm.shape[0] > 0:
             # Force strictly into [-1, 1] unit cube using the helper function
-            dsm_norm, _, _ = normalize_to_unit_cube(dsm_norm)
+            dsm_norm, unit_center, unit_scale = normalize_to_unit_cube(dsm_norm)
+            # Update center/scale to reflect the total transformation
+            # center/scale were from world->robust_norm. unit_center/unit_scale are from robust_norm->unit_cube.
+            # However, for simplicity and matching inference expectations, we report the final scale/center.
+            center = center + (unit_center.cpu().numpy() * (scale / 2.0))
+            scale  = unit_scale * (scale / 2.0)
         
         
         # ✅ DSM AUGMENTATION (Training only)
-        if hasattr(self, 'aug_scale') and self.training and dsm_norm.shape[0] > 0:
-            # 1. Scaling
-            s = 1.0 + (random.random() * 2 - 1) * self.aug_scale
-            dsm_norm = dsm_norm * s
-            
-            # 2. Jitter (Simulate sensor noise)
+        # 🔴 FIX: REMOVED scale and rotation augmentation because these transform
+        # the DSM input WITHOUT transforming the ground-truth L-string targets,
+        # creating an irreconcilable mismatch that prevents the model from
+        # learning a consistent geometry→token mapping.
+        # Only safe additive noise is kept (it doesn't change the overall structure).
+        if hasattr(self, 'aug_noise') and self.training and dsm_norm.shape[0] > 0:
+            # Jitter (Simulate sensor noise) — safe because it's small and symmetric
             noise = torch.randn_like(dsm_norm) * self.aug_noise
             dsm_norm = dsm_norm + noise
-            
-            # 3. Random Rotation around Vertical (Z) axis
-            if self.aug_rot:
-                angle = random.random() * 2 * np.pi
-                cos_a, sin_a = np.cos(angle), np.sin(angle)
-                # In our rot: X is horizontal, Y is depth, Z is vertical
-                # Rotate X,Y around Z
-                rot_mat = torch.tensor([
-                    [cos_a, -sin_a, 0],
-                    [sin_a,  cos_a, 0],
-                    [0, 0, 1]
-                ], dtype=torch.float32)
-                dsm_norm = dsm_norm @ rot_mat.T
         
         
         orthos = self.ortho_cache.get(tid)

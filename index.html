@@ -53,7 +53,7 @@
             width: 100%;
             max-width: 900px;
             border-radius: 12px;
-            box-shadow: 0 12px 32px rgba(0,0,0,0.1);
+            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.1);
             object-fit: cover;
         }
 
@@ -65,7 +65,7 @@
 
         .section img {
             border-radius: 8px;
-            box-shadow: 0 4px 16px rgba(0,0,0,0.06);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
         }
 
         h2 {
@@ -96,13 +96,12 @@
             color: var(--primary-hover);
         }
 
-        /* Full-width container for tables */
-        .fullwidth-table-wrapper {
-            width: 80vw;
-            margin-left: calc(-40vw + 50%);
-            margin-right: calc(-40vw + 50%);
+        /* Table Wrapper matching text width */
+        .page-width-table-wrapper {
+            width: 100%;
             padding: 20px 0;
             overflow-x: auto;
+            background-color: #ffffff;
         }
 
         table.results-table {
@@ -112,7 +111,7 @@
             margin: 0 auto;
             font-size: 14px;
             background: var(--surface);
-            box-shadow: 0 4px 16px rgba(0,0,0,0.05);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
             border-radius: 10px;
             overflow: hidden;
         }
@@ -130,7 +129,7 @@
         .results-table td:last-child {
             border-right: none;
         }
-        
+
         .results-table tr:last-child td {
             border-bottom: none;
         }
@@ -139,9 +138,9 @@
             max-width: 150px;
             height: auto;
             border-radius: 6px;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
             transition: transform 0.25s ease;
-            border: none !important; 
+            border: none !important;
         }
 
         .results-table img:hover {
@@ -177,14 +176,14 @@
             flex-direction: column;
             align-items: center;
             min-width: 160px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.03);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
             transition: box-shadow 0.25s ease, transform 0.25s ease;
         }
-        
+
         .resource-group-code:hover,
         .resource-group-paper:hover,
         .resource-group-data:hover {
-            box-shadow: 0 10px 24px rgba(0,0,0,0.08);
+            box-shadow: 0 10px 24px rgba(0, 0, 0, 0.08);
             transform: translateY(-3px);
         }
 
@@ -228,7 +227,7 @@
             transition: all 0.25s ease;
             margin-bottom: 12px;
         }
-        
+
         .resource-item a:hover {
             background: var(--primary);
             color: white;
@@ -238,7 +237,7 @@
         .resource-item i {
             font-size: 26px;
         }
-        
+
         .resource-item img {
             transition: all 0.25s ease;
         }
@@ -277,7 +276,7 @@
         }
 
         #paper-popup {
-            box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
             border: 1px solid #444;
             font-family: 'Inter', sans-serif;
         }
@@ -328,7 +327,7 @@
                     <div class="resource-item">
                         <a href="https://github.com/AngelikiGram/GeoTree3D"><i class="fa-brands fa-github"></i></a>
                         <div class="resource-label">GeoTree3D</div>
-                        <div class="resource-sub">Dataset Gen.</div>
+                        <div class="resource-sub">Dataset Gen</div>
                     </div>
                 </div>
             </div>
@@ -337,12 +336,12 @@
                 <div class="resource-group-title">Data</div>
                 <div class="resource-items">
                     <div class="resource-item">
-                        <a href="https://doi.org/10.48436/cnw9n-zxw07"><i class="fa-solid fa-database"></i></a>
+                        <a href="https://doi.org/10.48436/0n21q-2j598"><i class="fa-solid fa-database"></i></a>
                         <div class="resource-label">Dataset</div>
-                        <div class="resource-sub">Synthetic & Real</div>
+                        <div class="resource-sub">Synthetic (GeoTree3D)</div>
                     </div>
                     <div class="resource-item">
-                        <a href="https://drive.google.com/file/d/1zVpkl4hREym_-UoGFSODrlAYETtT8Qcl/view">
+                        <a href="https://drive.google.com/file/d/1USDAZhW-UUwQBaNEGqin3T7yqHUV1VWq/view?usp=sharing">
                             <img src="https://img.icons8.com/color/48/000000/google-drive--v2.png" style="height:30px;"
                                 alt="Google Drive">
                         </a>
@@ -375,52 +374,451 @@
 
     <div class="section">
         <h2>Methodology</h2>
-        <img src="docs/network_architecture.png" alt="Network Architecture"
+        <img src="docs/network_architecture.jpg" alt="Network Architecture"
             style="width:100%; border-radius:6px; margin-bottom:10px;">
         <p style="font-size: 14px; color: #555;">
-            <b>Figure 1:</b> Post-processing pipeline from raw predicted L-system to final rendered 3D tree, including
-            densification, pruning, smoothing, mesh generation with radius decay, leaf instancing, texture blending, and
-            final shading.
+            <b>Figure 2:</b> Overall architecture of the multimodal L-system generator. A multimodal visual encoder conditions an autoregressive backbone decoder factorized into a structural branch for token prediction and a parameter branch for geometric prediction, with supervision (green).
         </p>
     </div>
 
     <div class="section">
         <h2>Qualitative Results</h2>
-        <p>Reconstructions from real-world Austrian landmark trees and French IGN data[cite: 265, 266].</p>
+        <p>Reconstructions from real-world Austrian landmark trees and French IGN data</p>
 
-        <div class="fullwidth-table-wrapper">
-            <table class="results-table">
-                <tr class="group-header">
-                    <th>Input DSM</th>
-                    <th>Input Orthophoto</th>
-                    <th>Reference Photo</th>
-                    <th>TreesFormer Output</th>
-                </tr>
-                <tr>
-                    <td><img src="docs/results/dsm_1.jpg" alt="DSM"></td>
-                    <td><img src="docs/results/ortho_1.jpg" alt="Ortho"></td>
-                    <td><img src="docs/results/target_1.jpg" alt="Reference"></td>
-                    <td><img src="docs/results/output_1.jpg" alt="Prediction"></td>
-                </tr>
-                <tr>
-                    <td><img src="docs/results/dsm_2.jpg" alt="DSM"></td>
-                    <td><img src="docs/results/ortho_2.jpg" alt="Ortho"></td>
-                    <td><img src="docs/results/target_2.jpg" alt="Reference"></td>
-                    <td><img src="docs/results/output_2.jpg" alt="Prediction"></td>
-                </tr>
+        <div class="page-width-table-wrapper">
+            <style>
+                .landmark-table {
+                    width: 100%;
+                    table-layout: fixed;
+                    border-collapse: collapse;
+                    text-align: center;
+                    font-size: 14px;
+                    background-color: #ffffff;
+                }
+                .landmark-table th, .landmark-table td {
+                    border: 1px solid #ddd;
+                    padding: 4px;
+                    vertical-align: middle;
+                }
+                .landmark-table th:first-child,
+                .landmark-table th.divider {
+                    width: 30px; /* Small width for numbering/dividers */
+                }
+                .landmark-table th {
+                    background-color: #ffffff;
+                    font-weight: bold;
+                }
+                .landmark-table img {
+                    width: 100%;
+                    height: 90px;
+                    object-fit: contain;
+                    display: block;
+                    margin: 0 auto;
+                }
+                .landmark-table .divider {
+                    border-left: 2px solid #555;
+                }
+                .landmark-table .divider strong {
+                    margin-left: -2px; /* Center text better */
+                }
+            </style>
+            <table class="landmark-table">
+                <thead>
+                    <tr>
+                        <th></th>
+                        <th colspan="4" style="text-align: center;">Typical Reconstructions</th>
+                        <th class="divider"></th>
+                        <th colspan="4" style="text-align: center;">Difficult Cases</th>
+                    </tr>
+                    <tr>
+                        <th></th>
+                        <th>DSM</th>
+                        <th>Orthophoto</th>
+                        <th>Target</th>
+                        <th>Output</th>
+                        <th class="divider"></th>
+                        <th>DSM</th>
+                        <th>Orthophoto</th>
+                        <th>Target</th>
+                        <th>Output</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>1</strong></td>
+                        <td><img src="docs/RESULTS/DSM/tree_25.jpg" alt="DSM 25"></td>
+                        <td><img src="docs/RESULTS/ORTHOPHOTOS/ortho_25.png" alt="Ortho 25"></td>
+                        <td><img src="docs/RESULTS/PHOTOS/25.png" alt="Target 25"></td>
+                        <td><img src="docs/RESULTS/TREES/25.jpg" alt="Output 25"></td>
+                        <td class="divider"><strong>1</strong></td>
+                        <td><img src="docs/RESULTS/DSM/tree_19.jpg" alt="DSM 19"></td>
+                        <td><img src="docs/RESULTS/ORTHOPHOTOS/ortho_19.png" alt="Ortho 19"></td>
+                        <td><img src="docs/RESULTS/PHOTOS/19.png" alt="Target 19"></td>
+                        <td><img src="docs/RESULTS/TREES/19.jpg" alt="Output 19"></td>
+                    </tr>
+                    <tr>
+                        <td><strong>2</strong></td>
+                        <td><img src="docs/RESULTS/DSM/tree_3.jpg" alt="DSM 3"></td>
+                        <td><img src="docs/RESULTS/ORTHOPHOTOS/ortho_3.png" alt="Ortho 3"></td>
+                        <td><img src="docs/RESULTS/PHOTOS/03.png" alt="Target 3"></td>
+                        <td><img src="docs/RESULTS/TREES/3_1.jpg" alt="Output 3"></td>
+                        <td class="divider"><strong>2</strong></td>
+                        <td><img src="docs/RESULTS/DSM/tree_68.jpg" alt="DSM 68"></td>
+                        <td><img src="docs/RESULTS/ORTHOPHOTOS/ortho_68.png" alt="Ortho 68"></td>
+                        <td><img src="docs/RESULTS/PHOTOS/68.png" alt="Target 68"></td>
+                        <td><img src="docs/RESULTS/TREES/68.jpg" alt="Output 68"></td>
+                    </tr>
+                    <tr>
+                        <td><strong>3</strong></td>
+                        <td><img src="docs/RESULTS/DSM/tree_37.jpg" alt="DSM 37"></td>
+                        <td><img src="docs/RESULTS/ORTHOPHOTOS/ortho_37.png" alt="Ortho 37"></td>
+                        <td><img src="docs/RESULTS/PHOTOS/37.png" alt="Target 37"></td>
+                        <td><img src="docs/RESULTS/TREES/37.jpg" alt="Output 37"></td>
+                        <td class="divider"><strong>3</strong></td>
+                        <td><img src="docs/RESULTS/DSM/tree_44.jpg" alt="DSM 44"></td>
+                        <td><img src="docs/RESULTS/ORTHOPHOTOS/ortho_44.png" alt="Ortho 44"></td>
+                        <td><img src="docs/RESULTS/PHOTOS/44.png" alt="Target 44"></td>
+                        <td><img src="docs/RESULTS/TREES/44.jpg" alt="Output 44"></td>
+                    </tr>
+                    <tr>
+                        <td><strong>4</strong></td>
+                        <td><img src="docs/RESULTS/DSM/tree_71.jpg" alt="DSM 71"></td>
+                        <td><img src="docs/RESULTS/ORTHOPHOTOS/ortho_71.png" alt="Ortho 71"></td>
+                        <td><img src="docs/RESULTS/PHOTOS/71.png" alt="Target 71"></td>
+                        <td><img src="docs/RESULTS/TREES/71-2.jpg" alt="Output 71"></td>
+                        <td class="divider"><strong>4</strong></td>
+                        <td><img src="docs/RESULTS/DSM/tree_8.jpg" alt="DSM 8"></td>
+                        <td><img src="docs/RESULTS/ORTHOPHOTOS/ortho_8.png" alt="Ortho 8"></td>
+                        <td><img src="docs/RESULTS/PHOTOS/08.png" alt="Target 8"></td>
+                        <td><img src="docs/RESULTS/TREES/08.jpg" alt="Output 8"></td>
+                    </tr>
+                </tbody>
             </table>
+            <p style="font-size: 14px; color: #555; margin-top: 10px;">
+                <strong>Table 1:</strong> Reconstructed landmark trees (left) and difficult cases (right). Difficult cases: (1) DSM underestimates tree size, (2) cluttered orthophoto, (3) dead tree, (4) failure -- simultaneous modality ambiguity.
+            </p>
         </div>
-    </div>
 
-    <div class="section">
-        <h2>Key Advantages</h2>
-        <ul>
-            <li><b>Efficiency:</b> Each predicted L-system requires only ~1 KB of storage[cite: 347].</li>
-            <li><b>Interpretability:</b> Unlike mesh-based methods, TreesFormer produces editable L-system strings[cite:
-                35, 351].</li>
-            <li><b>Multimodal Fusion:</b> Combines geometric elevation cues from DSMs with appearance/shadow cues from
-                orthophotos[cite: 32].</li>
-        </ul>
+        <h3 style="margin-top: 40px;">State-of-the-Art Comparison & Modality Ablation</h3>
+        
+        <div class="page-width-table-wrapper" style="display: flex; flex-wrap: wrap; gap: 20px; align-items: stretch; margin-top: 20px;">
+            <!-- SOTA Qualitative Results -->
+            <div style="flex: 3; overflow-x: auto; min-width: 600px;">
+                <style>
+                    .sota-table {
+                        width: 100%;
+                        table-layout: fixed;
+                        border-collapse: collapse;
+                        text-align: center;
+                        font-size: 11px; /* Smaller font for large table */
+                        background-color: #ffffff;
+                    }
+                    .sota-table th, .sota-table td {
+                        border: 1px solid #ddd;
+                        padding: 2px;
+                        vertical-align: middle;
+                    }
+                    .sota-table th {
+                        background-color: #ffffff;
+                    }
+                    .sota-table .header-lightgray {
+                        background-color: #f2f2f2;
+                    }
+                    .sota-table img {
+                        width: 100%;
+                        height: 70px;
+                        object-fit: contain;
+                        display: block;
+                        margin: 0 auto;
+                    }
+                    /* Remove specific divider styles here to flatten the table structure uniformly */
+                </style>
+                <table class="sota-table">
+                    <thead>
+                        <tr>
+                            <th colspan="2" class="header-lightgray"><strong>Inputs</strong></th>
+                            <th rowspan="2"><strong>Ground<br>Truth</strong></th>
+                            <th colspan="6"><strong>Networks</strong></th>
+                        </tr>
+                        <tr>
+                            <th class="header-lightgray"><strong>DSM</strong></th>
+                            <th class="header-lightgray"><strong>Ortho</strong></th>
+                            <th><strong>Tree<br>D-Fusion</strong></th>
+                            <th><strong>SVDTree</strong></th>
+                            <th><strong>Latent<br>L-Systems</strong></th>
+                            <th><strong>TreeON</strong></th>
+                            <th colspan="2"><strong>Ours</strong></th>
+                        </tr>
+                        <tr style="font-size: 9px; color: #666;">
+                            <td class="header-lightgray"></td>
+                            <td class="header-lightgray"></td>
+                            <td></td>
+                            <td>[Lee et al. 2024]</td>
+                            <td>[10656708]</td>
+                            <td>[10.1145/3627101]</td>
+                            <td>[Grammatikaki et al. 2026]</td>
+                            <td colspan="2"></td>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="header-lightgray"><img src="docs/RESULTS_SOTA/DSM/tree_0191.jpg" alt="DSM 191"></td>
+                            <td class="header-lightgray"><img src="docs/RESULTS_SOTA/ORTHOS/ortho_191.png" alt="Ortho 191"></td>
+                            <td><img src="docs/RESULTS_SOTA/TREES/191_gt.jpg" alt="GT 191"></td>
+                            <td><img src="docs/RESULTS_SOTA/TREEDFUSION/treedfusion_1.jpg" alt="TreeD 191"></td>
+                            <td><img src="docs/RESULTS_SOTA/SVDTree/svdtree_191.jpg" alt="SVD 191"></td>
+                            <td><img src="docs/RESULTS_SOTA/LATENTLSYSTEMS/latent_191.jpg" alt="Latent 191"></td>
+                            <td><img src="docs/RESULTS_SOTA/TreeON/191_gram.jpg" alt="TreeON 191"></td>
+                            <td><img src="docs/RESULTS_SOTA/MINE/191_test_rendered.jpg" alt="Ours Rendered 191"></td>
+                            <td><img src="docs/RESULTS_SOTA/LEAVES/191_test_leaves.jpg" alt="Ours Leaves 191"></td>
+                        </tr>
+                        <tr>
+                            <td class="header-lightgray"><img src="docs/RESULTS_SOTA/DSM/tree_0001.jpg" alt="DSM 1"></td>
+                            <td class="header-lightgray"><img src="docs/RESULTS_SOTA/ORTHOS/ortho_1.png" alt="Ortho 1"></td>
+                            <td><img src="docs/RESULTS_SOTA/TREES/1_gt.jpg" alt="GT 1"></td>
+                            <td><img src="docs/RESULTS_SOTA/TREEDFUSION/treedfusion_191.jpg" alt="TreeD 1"></td>
+                            <td><img src="docs/RESULTS_SOTA/SVDTree/svdtree_1.jpg" alt="SVD 1"></td>
+                            <td><img src="docs/RESULTS_SOTA/LATENTLSYSTEMS/latent_1.jpg" alt="Latent 1"></td>
+                            <td><img src="docs/RESULTS_SOTA/TreeON/1_gram.jpg" alt="TreeON 1"></td>
+                            <td><img src="docs/RESULTS_SOTA/MINE/1_test_rendered.jpg" alt="Ours Rendered 1"></td>
+                            <td><img src="docs/RESULTS_SOTA/LEAVES/1_test_leaves.jpg" alt="Ours Leaves 1"></td>
+                        </tr>
+                        <tr>
+                            <td class="header-lightgray"><img src="docs/RESULTS_SOTA/DSM/tree_01445.jpg" alt="DSM 1445"></td>
+                            <td class="header-lightgray"><img src="docs/RESULTS_SOTA/ORTHOS/ortho_1445.png" alt="Ortho 1445"></td>
+                            <td><img src="docs/RESULTS_SOTA/TREES/1445_gt.jpg" alt="GT 1445"></td>
+                            <td><img src="docs/RESULTS_SOTA/TREEDFUSION/treedfusion_1445.jpg" alt="TreeD 1445"></td>
+                            <td><img src="docs/RESULTS_SOTA/SVDTree/svdtree_1445.jpg" alt="SVD 1445"></td>
+                            <td><img src="docs/RESULTS_SOTA/LATENTLSYSTEMS/latent_1445.jpg" alt="Latent 1445"></td>
+                            <td><img src="docs/RESULTS_SOTA/TreeON/1445_gram.jpg" alt="TreeON 1445"></td>
+                            <td><img src="docs/RESULTS_SOTA/MINE/1445_test_rendered.jpg" alt="Ours Rendered 1445"></td>
+                            <td><img src="docs/RESULTS_SOTA/LEAVES/1445_test_leaves.jpg" alt="Ours Leaves 1445"></td>
+                        </tr>
+                    </tbody>
+                </table>
+                <p style="font-size: 13px; color: #555; margin-top: 10px; text-align: center;">
+                    (a) Visual outputs for test trees.
+                </p>
+            </div>
+
+            <!-- SOTA Quantitative Metrics -->
+            <div style="flex: 1; min-width: 250px; display: flex; flex-direction: column; justify-content: center;">
+                <style>
+                    .metrics-table {
+                        width: 100%;
+                        border-collapse: collapse;
+                        font-size: 14px;
+                        text-align: right;
+                        background-color: #ffffff;
+                    }
+                    .metrics-table th {
+                        border-bottom: 2px solid #555;
+                        border-top: 2px solid #555;
+                        padding: 8px 4px;
+                        background-color: #ffffff;
+                        text-align: right;
+                    }
+                    .metrics-table td {
+                        padding: 6px 4px;
+                        border-bottom: 1px solid #ddd;
+                    }
+                    .metrics-table tbody tr:last-child {
+                        border-bottom: 3px solid #555;
+                    }
+                    .metrics-table th:first-child, .metrics-table td:first-child {
+                        text-align: left;
+                    }
+                </style>
+                <table class="metrics-table">
+                    <thead>
+                        <tr>
+                            <th><strong>Method</strong></th>
+                            <th><strong>NCD</strong>&darr;</th>
+                            <th><strong>F1</strong>&uarr;</th>
+                            <th><strong>COV</strong>&uarr;</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Tree D-Fusion</td>
+                            <td>0.66</td>
+                            <td>0.01</td>
+                            <td>16%</td>
+                        </tr>
+                        <tr>
+                            <td>SVDTree</td>
+                            <td>0.31</td>
+                            <td>0.58</td>
+                            <td>72%</td>
+                        </tr>
+                        <tr>
+                            <td>Latent L-Systems</td>
+                            <td>0.33</td>
+                            <td>0.57</td>
+                            <td>44%</td>
+                        </tr>
+                        <tr>
+                            <td>TreeON</td>
+                            <td>0.24</td>
+                            <td>0.76</td>
+                            <td><strong>86%</strong></td>
+                        </tr>
+                        <tr>
+                            <td><strong>Ours</strong></td>
+                            <td><strong>0.21</strong></td>
+                            <td><strong>0.81</strong></td>
+                            <td>75%</td>
+                        </tr>
+                    </tbody>
+                </table>
+                <p style="font-size: 13px; color: #555; margin-top: 10px; text-align: center;">
+                    (b) Quantitative results.
+                </p>
+            </div>
+        </div>
+
+        <p style="font-size: 14px; color: #555; margin-top: 5px; text-align: center;">
+            <strong>Table 2:</strong> Comparison with state-of-the-art methods.
+        </p>
+
+        <div class="page-width-table-wrapper" style="margin-top: 30px;">
+            <style>
+                .ablation-table {
+                    width: 100%;
+                    table-layout: fixed;
+                    margin: 0 auto;
+                    border-collapse: collapse;
+                    text-align: center;
+                    font-size: 13px;
+                    background-color: #ffffff;
+                }
+                .ablation-table th {
+                    border-bottom: 1px solid #888;
+                    border-top: 1px solid #888;
+                    padding: 4px;
+                }
+                .ablation-table td {
+                    padding: 4px;
+                }
+                .ablation-table img {
+                    width: 100%;
+                    height: 100px;
+                    object-fit: contain;
+                    display: block;
+                    margin: 0 auto 4px auto;
+                }
+                .ablation-table .thick-vrule {
+                    border-left: 2px solid #555;
+                }
+            </style>
+            <table class="ablation-table">
+                <thead>
+                    <tr>
+                        <th colspan="3"><strong>Inputs</strong></th>
+                        <th colspan="3" class="thick-vrule"><strong>Predictions</strong></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>
+                            <img src="docs/RESULTS_ABLATION/tree_20.jpg" alt="Target">
+                            <small>Target</small>
+                        </td>
+                        <td>
+                            <img src="docs/RESULTS_ABLATION/dsm_20.jpg" alt="DSM">
+                            <small>DSM</small>
+                        </td>
+                        <td>
+                            <img src="docs/RESULTS_ABLATION/ortho_20.png" alt="Orthophoto">
+                            <small>Orthophoto</small>
+                        </td>
+                        <td class="thick-vrule">
+                            <img src="docs/RESULTS_ABLATION/TREES/dsm.jpg" alt="DSM only">
+                            <small>DSM only</small>
+                        </td>
+                        <td>
+                            <img src="docs/RESULTS_ABLATION/TREES/ortho.jpg" alt="Ortho only">
+                            <small>Ortho only</small>
+                        </td>
+                        <td>
+                            <img src="docs/RESULTS_ABLATION/TREES/both.jpg" alt="DSM + Ortho">
+                            <small>DSM + Ortho</small>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+            <p style="font-size: 14px; color: #555; margin-top: 10px; text-align: center;">
+                <strong>Figure 2:</strong> Qualitative modality ablation on a representative tree.
+            </p>
+        </div>
+
+        <h3 style="margin-top: 40px;">Generalization on French IGN Data (LiDAR)</h3>
+        <div class="page-width-table-wrapper">
+            <style>
+                .lidar-table {
+                    width: 100%;
+                    table-layout: fixed;
+                    border-collapse: collapse;
+                    text-align: center;
+                    font-size: 14px;
+                    background-color: #ffffff;
+                }
+                .lidar-table th, .lidar-table td {
+                    border-bottom: 1px solid #ddd;
+                    padding: 8px 4px;
+                    vertical-align: middle;
+                }
+                .lidar-table th {
+                    border-top: 2px solid #555;
+                    border-bottom: 2px solid #555;
+                    font-weight: bold;
+                    background-color: #ffffff;
+                }
+                .lidar-table th:first-child {
+                    width: 40px; /* Small width for row numbers */
+                }
+                .lidar-table img {
+                    width: 100%;
+                    height: 120px; /* Smaller uniform height */
+                    object-fit: contain; /* Prevent distortion */
+                    display: block;
+                    margin: 0 auto;
+                }
+                .lidar-table tbody tr:last-child {
+                    border-bottom: 3px solid #555;
+                }
+            </style>
+            <table class="lidar-table">
+                <thead>
+                    <tr>
+                        <th></th>
+                        <th>DSM</th>
+                        <th>Orthophoto</th>
+                        <th>LiDAR</th>
+                        <th>Ours</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>1</strong></td>
+                        <td><img src="docs/RESULTS_FRANCE/DSM/dsm_4f.jpg" alt="DSM 4f"></td>
+                        <td><img src="docs/RESULTS_FRANCE/ORTHOPHOTOS/ortho_4.png" alt="Ortho 4"></td>
+                        <td><img src="docs/RESULTS_FRANCE/LIDAR_FRANCE/4.jpg" alt="LiDAR 4"></td>
+                        <td><img src="docs/RESULTS_FRANCE/TREES/4_france.jpg" alt="Ours 4"></td>
+                    </tr>
+                    <tr>
+                        <td><strong>2</strong></td>
+                        <td><img src="docs/RESULTS_FRANCE/DSM/dsm_7.jpg" alt="DSM 7"></td>
+                        <td><img src="docs/RESULTS_FRANCE/ORTHOPHOTOS/ortho_7.png" alt="Ortho 7"></td>
+                        <td><img src="docs/RESULTS_FRANCE/LIDAR_FRANCE/7.jpg" alt="LiDAR 7"></td>
+                        <td><img src="docs/RESULTS_FRANCE/TREES/7_france_1.jpg" alt="Ours 7"></td>
+                    </tr>
+                </tbody>
+            </table>
+            <p style="font-size: 14px; color: #555; margin-top: 10px;">
+                <strong>Table 3:</strong> Qualitative comparison against IGN LiDAR point clouds (37 and 25 pts/m&sup2;) in the French Pyrenees.
+            </p>
+        </div>
     </div>
 
     <!-- <footer>

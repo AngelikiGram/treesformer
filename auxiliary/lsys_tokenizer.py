@@ -71,13 +71,18 @@ def compute_grammar_mask(type_sequence):
     mask[L-1] = GRAMMAR_MATRIX[TokenType.EOS]
     return mask
 
+_GRAMMAR_MATRIX_CACHE = {}
+
 def apply_grammar_mask(logits, prev_type_id):
     """
-    logits: (NUM_TYPES,)
-    prev_type_id: int
+    logits: (NUM_TYPES,) or (B, NUM_TYPES)
+    prev_type_id: int or tensor of ints
     """
-    grammar_matrix_device = GRAMMAR_MATRIX.to(logits.device)
-    mask = grammar_matrix_device[prev_type_id]
+    device = logits.device
+    if device not in _GRAMMAR_MATRIX_CACHE:
+        _GRAMMAR_MATRIX_CACHE[device] = GRAMMAR_MATRIX.to(device)
+        
+    mask = _GRAMMAR_MATRIX_CACHE[device][prev_type_id]
     return logits.masked_fill(mask == 0, float("-inf"))
 
 # ============================================================

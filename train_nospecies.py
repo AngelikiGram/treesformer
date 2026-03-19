@@ -468,7 +468,7 @@ class FullMultimodalEncoder(nn.Module):
     - Downsample from 2549 tokens to ~256 tokens
     - 10x reduction in cross-attention memory
     """
-    def __init__(self, dim=512, visual_bottleneck=640, visual_dropout=0.1, num_species=30):
+    def __init__(self, dim=512, visual_bottleneck=640, visual_dropout=0.1):
         super().__init__()
         self.visual_dropout = visual_dropout
         self.dim = dim
@@ -496,17 +496,9 @@ class FullMultimodalEncoder(nn.Module):
         self.dsm_pooler = AttentionPooler(dim)
         self.ortho_pooler = AttentionPooler(dim)
         
-        # 4. Balanced Global Fusion -> Species Head
-        self.species_head = nn.Sequential(
-            nn.Linear(dim, 512),
-            nn.LayerNorm(512),
-            nn.ReLU(),
-            nn.Dropout(0.2), # Increased dropout for better generalization
-            nn.Linear(512, 512), # Added deeper head
-            nn.LayerNorm(512),
-            nn.ReLU(),
-            nn.Linear(512, num_species)
-        )
+        # 4. Balanced Global Fusion
+        # We no longer need a species head, but we keep the global feature 
+        # for the anchor token to help with structural grounding.
         
         # Redundant bottleneck removed in favor of balanced additive fusion
         # Additive fusion happens in model-dim space (dim)
@@ -582,12 +574,6 @@ class FullMultimodalEncoder(nn.Module):
         else:
             global_feat = d_global
 
-        # ✅ NEW: Multi-view species prediction
-        # Output fused prediction AND individual predictions for robust supervision
-        species_logits = self.species_head(global_feat)
-        d_logits = self.species_head(d_global)
-        o_logits = self.species_head(o_global)
-
         # --- LOCAL MEMORY BANK (For Structural Generation) ---
         num_ortho = o.shape[1]
         num_dsm_target = max(1, self.visual_bottleneck - num_ortho)
@@ -620,7 +606,7 @@ class FullMultimodalEncoder(nn.Module):
             keep = (torch.rand(B, device=device) >= self.visual_dropout).float()  # (B,)
             visual_memory = visual_memory * keep.view(B, 1, 1)
 
-        return visual_memory, global_feat, species_logits, d_logits, o_logits
+        return visual_memory, global_feat
 
 
 # ============================================================
@@ -1023,10 +1009,9 @@ class LSystemModel(nn.Module):
         device = dsm_pts.device
         
         # Encode visual context once
-        # Integrated species logits are now returned from the mm encoder
         mm_out = self.mm(dsm_pts, ortho_img)
-        visual_memory, global_feat, species_logits = mm_out[0], mm_out[1], mm_out[2]
-        self._pooled_visual_cache = mm_out
+        visual_memory, global_feat = mm_out[0], mm_out[1]
+        self._pooled_visual_cache = global_feat
         
         # Track sequences as tensors
         types_acc = torch.full((B, 1), TokenType.F, dtype=torch.long, device=device)
@@ -1035,6 +1020,9 @@ class LSystemModel(nn.Module):
         # State tracking
         bracket_depth = torch.zeros(B, dtype=torch.long, device=device)
         finished      = torch.zeros(B, dtype=torch.bool, device=device)
+        steps_since_f = torch.zeros(B, dtype=torch.long, device=device)
+        f_at_depth    = torch.zeros((B, 33), dtype=torch.bool, device=device)
+        f_at_depth[:, 0] = True # Starting Axiom F is at depth 0
         
         # KV cache slots: backbone + structural decoder layers
         n_backbone = len(self.blocks)
@@ -1111,6 +1099,19 @@ class LSystemModel(nn.Module):
             logits_t[:, TokenType.LBR] = logits_t[:, TokenType.LBR].masked_fill(bracket_depth >= max_depth, float('-inf'))
             logits_t[:, TokenType.EOS] = logits_t[:, TokenType.EOS].masked_fill(bracket_depth > 0, float('-inf'))
             
+            # 🔴 MOVEMENT PRESSURE: Force F if stuck in non-moving loops
+            stuck_mask = steps_since_f > 5
+            logits_t[stuck_mask, TokenType.F] += 5.0
+            
+            # 🔴 STRUCTURAL RULE: Cannot close branch if no F was emitted in it
+            current_f_at_depth = f_at_depth.gather(1, bracket_depth.unsqueeze(1)).squeeze(1)
+            no_closing_mask = (bracket_depth > 0) & (~current_f_at_depth)
+            logits_t[no_closing_mask, TokenType.RBR] = float('-inf')
+            
+            # 🔴 EOS Guard: Must have F at root level
+            no_eos_mask = ~f_at_depth[:, 0]
+            logits_t[no_eos_mask, TokenType.EOS] = float('-inf')
+            
             logits_t = torch.clamp(logits_t, -100, 100)
             
             # Choose temperature per sample
@@ -1129,10 +1130,27 @@ class LSystemModel(nn.Module):
             next_t = torch.multinomial(probs_t, 1) # (B, 1)
             
             # Update sequence state
-            bracket_depth += (next_t == TokenType.LBR).long().view(-1)
-            bracket_depth -= (next_t == TokenType.RBR).long().view(-1)
-            finished      |= (next_t == TokenType.EOS).view(-1)
-            finished      |= (next_t == TokenType.PAD).view(-1)
+            next_t_flat = next_t.view(-1)
+            is_f = (next_t_flat == TokenType.F)
+            is_lbr = (next_t_flat == TokenType.LBR)
+            is_rbr = (next_t_flat == TokenType.RBR)
+            
+            if is_f.any():
+                f_at_depth[is_f, bracket_depth[is_f]] = True
+                
+            steps_since_f[is_f] = 0
+            steps_since_f[~is_f & ~finished] += 1
+            
+            bracket_depth += is_lbr.long()
+            if is_lbr.any():
+                safe_depth = torch.clamp(bracket_depth, max=32)
+                f_at_depth[is_lbr, safe_depth[is_lbr]] = False
+                
+            bracket_depth -= is_rbr.long()
+            bracket_depth = torch.clamp(bracket_depth, min=0)
+            
+            finished |= (next_t_flat == TokenType.EOS)
+            finished |= (next_t_flat == TokenType.PAD)
             
             # Sample values
             next_vals = torch.zeros((B, 1, 3), dtype=torch.long, device=device)
@@ -1183,7 +1201,7 @@ class LSystemModel(nn.Module):
             
         return final_types, final_vals
 
-    def __init__(self, type_vocab=5, f_bins=10, theta_bins=6, phi_bins=6, dim=512, layers=8, heads=16, num_species=13, max_window=1024, cross_attn_window=None, visual_bottleneck=None):
+    def __init__(self, type_vocab=5, f_bins=10, theta_bins=6, phi_bins=6, dim=512, layers=8, heads=16, max_window=1024, cross_attn_window=None, visual_bottleneck=None):
         super().__init__()
         # Dynamically tie internal windows to the total window size if not specified
         if cross_attn_window is None: cross_attn_window = max_window
@@ -1205,7 +1223,7 @@ class LSystemModel(nn.Module):
         self.emb_drop = nn.Dropout(p=0.1)
 
         self.rope = RotaryEmbedding(dim=dim // heads, max_seq_len=max_window)
-        self.mm = FullMultimodalEncoder(dim=dim, visual_bottleneck=visual_bottleneck, num_species=num_species)
+        self.mm = FullMultimodalEncoder(dim=dim, visual_bottleneck=visual_bottleneck)
         
         self.blocks = nn.ModuleList([
             CrossAttentionBlock(
@@ -1300,24 +1318,19 @@ class LSystemModel(nn.Module):
             visual_memory_cache: Cached visual features (to avoid recomputing for each chunk)
             
         Returns:
-            type_logits, val_logits, species_logits, new_kv_caches, visual_memory, pred_state
+            type_logits, val_logits, new_kv_caches, visual_memory, pred_state
         """
         B, T = type_in.shape
         
         # ✅ TRUNCATED BPTT: Reuse visual memory across chunks (computed once per sequence)
         if visual_memory_cache is not None:
-            # Unpack cached features (handles expanded return signature)
-            visual_memory, global_feat, species_logits = visual_memory_cache[0], visual_memory_cache[1], visual_memory_cache[2]
-            # Extra logits for supervision are usually index 3 and 4
-            d_logits = visual_memory_cache[3] if len(visual_memory_cache) > 3 else None
-            o_logits = visual_memory_cache[4] if len(visual_memory_cache) > 4 else None
+            # Unpack cached features
+            visual_memory, global_feat = visual_memory_cache[0], visual_memory_cache[1]
         else:
-            # Returns: visual_memory, global_feat, species_logits, d_logits, o_logits
-            mm_out = self.mm(dsm_pts, ortho_img)
-            visual_memory, global_feat, species_logits = mm_out[0], mm_out[1], mm_out[2]
-            d_logits, o_logits = mm_out[3], mm_out[4]
+            # Returns: visual_memory, global_feat
+            visual_memory, global_feat = self.mm(dsm_pts, ortho_img)
         
-        self._pooled_visual_cache = species_logits  # Cache primary logits for logging
+        self._pooled_visual_cache = global_feat  # Cache global feature for context
         
         x = self.type_emb(type_in)
         
@@ -1392,12 +1405,28 @@ class LSystemModel(nn.Module):
         pred_state = self.state_head(h_backbone)  # (B, T, 9)
 
         all_new_caches = new_backbone_caches + new_struct_caches
-        # Return full mm_out for caching if we just computed it
-        mm_cache = visual_memory_cache if visual_memory_cache is not None else (visual_memory, global_feat, species_logits, d_logits, o_logits)
-        return type_logits, val_logits, species_logits, all_new_caches, mm_cache, pred_state
+        # Return mm_out for caching if we just computed it
+        mm_cache = visual_memory_cache if visual_memory_cache is not None else (visual_memory, global_feat)
+        return type_logits, val_logits, all_new_caches, mm_cache, pred_state
     
     @torch.no_grad()
     def generate(self, dsm_pts, ortho_img, tokenizer, max_len=1000, temperature=1.0, temperature_structural=0.7, max_depth=20):
+        """
+        Legacy string-based generation endpoint (Now dramatically accelerated!).
+        Wraps the vectorized, batched pure_inference method and converts to string formats.
+        """
+        types_batch, vals_batch = self.pure_inference(
+            dsm_pts, ortho_img, tokenizer,
+            max_len=max_len,
+            temperature=temperature,
+            temperature_structural=temperature_structural,
+            max_depth=max_depth
+        )
+        # Return string of the first predicted batch item
+        return tokenizer.decode(types_batch[0], vals_batch[0])
+
+    @torch.no_grad()
+    def generate1(self, dsm_pts, ortho_img, tokenizer, max_len=1000, temperature=1.0, temperature_structural=0.7, max_depth=20):
         """
         BRACKET-SAFE Generation with KV Caching for 10-30x speedup
         
@@ -1421,10 +1450,9 @@ class LSystemModel(nn.Module):
         self.eval()
 
         # Encode multimodal context ONCE
-        # Unpack species_logits (now internal to mm)
-        mm_out = self.mm(dsm_pts, ortho_img)
-        visual_memory, global_feat, species_logits = mm_out[0], mm_out[1], mm_out[2]
-        self._pooled_visual_cache = species_logits  # Cache for subsequent chunks if needed
+        # Unpack visual features
+        visual_memory, global_feat = self.mm(dsm_pts, ortho_img)
+        self._pooled_visual_cache = global_feat
 
         # 🔴 START FIX: Do NOT hardcode F0. 
         # Start with an empty sequence or a neutral starting state if needed.
@@ -1725,13 +1753,12 @@ def forward_with_truncated_bptt(model, type_in, val_in, dsm_pts, ortho_img, chun
     Process long sequences in chunks with KV cache carry-over
     """
     B, T_total = type_in.shape
-    device = type_in.device
     
     # ✅ TRUNCATED BPTT: Reuse visual memory across chunks (computed once per sequence)
     if visual_memory_cache is not None:
         visual_memory_cache_all = visual_memory_cache
     else:
-        # Returns: (visual_memory, global_feat, species_logits, d_logits, o_logits)
+        # Returns: (visual_memory, global_feat)
         visual_memory_cache_all = model.mm(dsm_pts, ortho_img)
     
     # Initialize KV caches (one per layer)
@@ -1740,7 +1767,6 @@ def forward_with_truncated_bptt(model, type_in, val_in, dsm_pts, ortho_img, chun
     all_type_logits = []
     all_val_logits = []
     all_pred_states = []
-    species_logits = None  
     mm_out = None
     
     # Process sequence in chunks
@@ -1750,14 +1776,14 @@ def forward_with_truncated_bptt(model, type_in, val_in, dsm_pts, ortho_img, chun
         # Get chunk boundaries
         start = chunk_idx * chunk_size
         end = min(start + chunk_size, T_total)
-        T_chunk = end - start
         
         # Extract chunk
         type_chunk = type_in[:, start:end]
         val_chunk = val_in[:, start:end]
         
         # Forward pass for this chunk
-        tlog, vlog, sp_logits, new_kv_caches, mm_cache_current, chunk_pred_state = model(
+        # model returns: type_logits, val_logits, new_kv_caches, mm_cache, pred_state
+        tlog, vlog, new_kv_caches, mm_cache_current, chunk_pred_state = model(
             type_chunk, val_chunk, dsm_pts, ortho_img,
             kv_caches=kv_caches,
             pos_offset=start,  # Critical: proper RoPE positions
@@ -1767,8 +1793,6 @@ def forward_with_truncated_bptt(model, type_in, val_in, dsm_pts, ortho_img, chun
         all_type_logits.append(tlog)
         all_val_logits.append(vlog)
         all_pred_states.append(chunk_pred_state)
-        # Primary logits
-        species_logits = sp_logits
         mm_out = mm_cache_current
         
         # ✅ CRITICAL: Detach caches to prevent gradient flow across chunks
@@ -1777,7 +1801,7 @@ def forward_with_truncated_bptt(model, type_in, val_in, dsm_pts, ortho_img, chun
         else:
             kv_caches = None
     
-    return all_type_logits, all_val_logits, species_logits, mm_out, all_pred_states
+    return all_type_logits, all_val_logits, mm_out, all_pred_states
 
 
 # ============================================================
@@ -1821,7 +1845,6 @@ def train_model(
     theta_bins=6,
     phi_bins=6,
     modality="both", # "both", "dsm", "ortho"
-    use_species_loss=True, # Whether to use the species classification loss
 ):
     loader     = DataLoader(dataset,     batch_size=batch_size, shuffle=True,  drop_last=False, num_workers=4, pin_memory=True)
 
@@ -1829,7 +1852,6 @@ def train_model(
         f_bins=tokenizer.f_bins,
         theta_bins=tokenizer.theta_bins,
         phi_bins=tokenizer.phi_bins,
-        num_species=dataset.num_species,
         dim=dim,
         max_window=dataset.window,
         cross_attn_window=dataset.window,
@@ -1989,7 +2011,7 @@ def train_model(
                         s_prev_t = [TokenType.F] * B
                         
                         for s_ptr in range(T - 1):
-                            tl_s, vl_s, _, kv_s, _, _ = model(
+                            tl_s, vl_s, kv_s, mm_cache, _ = model(
                                 pred_types_b[:, s_ptr:s_ptr+1], pred_vals_b[:, s_ptr:s_ptr+1],
                                 None, None, # dsm_pts, ortho_img
                                 kv_caches=kv_s, pos_offset=s_ptr,
@@ -2007,8 +2029,8 @@ def train_model(
                     else:
                         # 🟡 SCHEDULED: Parallel logits from GT context (already teacher-forced in the model call)
                         # Use .detach() on v_mem here because we only want gradients from the final loss pass
-                        v_mem_detached = (v_mem[0].detach(), v_mem[1].detach(), v_mem[2].detach())
-                        tl_p, vl_p, _, _, _, _ = model(t_in, v_in, None, None, visual_memory_cache=v_mem_detached)
+                        v_mem_detached = (v_mem[0].detach(), v_mem[1].detach())
+                        tl_p, vl_p, _, _, _ = model(t_in, v_in, None, None, visual_memory_cache=v_mem_detached)
                         tl_cpu, vl_cpu = tl_p.cpu(), vl_p.cpu()
                         
                         pred_types_p = torch.zeros(B, T, dtype=torch.long, device=device)
@@ -2047,7 +2069,7 @@ def train_model(
             with torch.amp.autocast('cuda'):
                 if use_truncated_bptt and t_in.shape[1] > bptt_chunk_size:
                     # ✅ TRUNCATED BPTT: Process long sequences in chunks (skip redundant encoding)
-                    all_tlog, all_vlog, sp_logits, mm_out, all_pred_states = forward_with_truncated_bptt(
+                    all_tlog, all_vlog, mm_out, all_pred_states = forward_with_truncated_bptt(
                         model, t_in, v_in, dsm, ortho, 
                         chunk_size=bptt_chunk_size,
                         visual_memory_cache=v_mem
@@ -2060,45 +2082,12 @@ def train_model(
                     
                 else:
                     # Standard forward pass using pre-computed visual memory (NO redundant encoding)
-                    tlog, vlog, sp_logits, _, mm_out, pred_state = model(
+                    tlog, vlog, _, mm_out, pred_state = model(
                         t_in, v_in, None, None, visual_memory_cache=v_mem
                     )
             
-            # --- ROBUST SPECIES LOSS ---
-            # sp_gt == -1 means species unknown; ignore those.
-            valid_sp = sp_gt >= 0
-            if use_species_loss and valid_sp.any():
-                # 1. Primary Fused Loss
-                # Increased label smoothing to 0.15 for better generalization/less over-confidence
-                loss_sp_fused = F.cross_entropy(sp_logits[valid_sp], sp_gt[valid_sp], label_smoothing=0.15)
-                
-                # 2. Modality-Specific Auxiliary Losses (Independent supervision)
-                # Unpack modality-specific logits from mm_out
-                d_logits, o_logits = mm_out[3], mm_out[4]
-                loss_sp_dsm = F.cross_entropy(d_logits[valid_sp], sp_gt[valid_sp], label_smoothing=0.1)
-                loss_sp_ortho = F.cross_entropy(o_logits[valid_sp], sp_gt[valid_sp], label_smoothing=0.1)
-                
-                # 3. Consistency Regularization (KL Divergence)
-                # Ensure modalities agree on identity when both are present
-                ortho_is_missing_batch = (ortho.abs().max() < 1e-5)
-                dsm_is_missing_batch = (dsm.abs().max() < 1e-5)
-                
-                loss_sp_consist = torch.tensor(0.0, device=device)
-                if not ortho_is_missing_batch and not dsm_is_missing_batch:
-                    # Symmetric KL Divergence between modality predictions
-                    p_d = F.softmax(d_logits[valid_sp].detach(), dim=-1)
-                    p_o = F.softmax(o_logits[valid_sp].detach(), dim=-1)
-                    log_p_d = F.log_softmax(d_logits[valid_sp], dim=-1)
-                    log_p_o = F.log_softmax(o_logits[valid_sp], dim=-1)
-                    
-                    kl_ovd = F.kl_div(log_p_d, p_o, reduction='batchmean')
-                    kl_dvo = F.kl_div(log_p_o, p_d, reduction='batchmean')
-                    loss_sp_consist = 0.5 * (kl_ovd + kl_dvo)
-                
-                # Combined species loss
-                loss_sp = 5.0 * (loss_sp_fused + 0.5 * loss_sp_dsm + 0.5 * loss_sp_ortho + 0.2 * loss_sp_consist)
-            else:
-                loss_sp = torch.tensor(0.0, device=device, dtype=sp_logits.dtype)
+            # Species loss removed (train_nospecies.py)
+            loss_sp = torch.tensor(0.0, device=device)
 
             # --------------------------------------------------
             # POSITION-WEIGHTED TYPE LOSS
@@ -2479,7 +2468,33 @@ def generate_example(model, tokenizer, dsm, ortho, device="cuda"):
 
 
 if __name__ == "__main__":
-    import argparse, os
+    import argparse, os, re
+
+    def auto_detect_bins(lstrings_dir, current_f, current_theta, current_phi):
+        max_f, max_theta, max_phi = 0, 0, 0
+        re_SEGMENT = re.compile(r"([BSbs])(\d+)_(\d+)[F_]?(\d+)")
+        if not os.path.exists(lstrings_dir):
+            return current_f, current_theta, current_phi
+            
+        print(f"[INFO] Auto-detecting bin sizes from data in {lstrings_dir}...")
+        for f_name in os.listdir(lstrings_dir):
+            if f_name.endswith(".txt"):
+                try:
+                    with open(os.path.join(lstrings_dir, f_name), "r", encoding="utf-8") as file:
+                        matches = re_SEGMENT.findall(file.read())
+                        for m in matches:
+                            theta, phi, f_val = int(m[1]), int(m[2]), int(m[3])
+                            if theta > max_theta: max_theta = theta
+                            if phi > max_phi: max_phi = phi
+                            if f_val > max_f: max_f = f_val
+                except Exception as e:
+                    pass
+        
+        # Bins required = max_index + 1
+        new_f = max(current_f, max_f + 1)
+        new_theta = max(current_theta, max_theta + 1)
+        new_phi = max(current_phi, max_phi + 1)
+        return new_f, new_theta, new_phi
 
     parser = argparse.ArgumentParser(description="Train L-System model with geometric stability fixes")
     parser.add_argument("--lstrings_path", type=str, default="LSTRINGS_FINAL") # SYMBOLIC_LSTRINGS_d3
@@ -2547,6 +2562,22 @@ if __name__ == "__main__":
     BASE = args.base
 
     lstrings_path = args.lstrings_path
+    full_lstrings_dir = os.path.join(BASE, lstrings_path)
+
+    # --- AUTO-DETECT BINS FROM DATA ---
+    f_bins, theta_bins, phi_bins = auto_detect_bins(
+        full_lstrings_dir, args.f_bins, args.theta_bins, args.phi_bins
+    )
+    if f_bins != args.f_bins:
+        print(f"[INFO] Data auto-override f_bins: {args.f_bins} -> {f_bins}")
+    if theta_bins != args.theta_bins:
+        print(f"[INFO] Data auto-override theta_bins: {args.theta_bins} -> {theta_bins}")
+    if phi_bins != args.phi_bins:
+        print(f"[INFO] Data auto-override phi_bins: {args.phi_bins} -> {phi_bins}")
+    args.f_bins = f_bins
+    args.theta_bins = theta_bins
+    args.phi_bins = phi_bins
+    # ----------------------------------
 
     # --------------------------------------------------------
     # Select IDs  (10 % val split by tree ID, not by window)
@@ -2567,7 +2598,8 @@ if __name__ == "__main__":
         for hid in held_out_ids:
             f.write(f"{hid}\n")
 
-    print(f"[INFO] Train trees: {len(ids)}")
+    print(f"[INFO] Train trees ({len(ids)}):")
+    print(", ".join(ids))
     print(f"[INFO] Held-out trees saved to {held_out_file} (Count: {len(held_out_ids)})")
     print(f"[INFO] Stability features:")
     print(f"  - Bracket-safe generation: ENABLED (always on)")
@@ -2624,7 +2656,6 @@ if __name__ == "__main__":
         theta_bins=args.theta_bins,
         phi_bins=args.phi_bins,
         modality=args.modality,
-        use_species_loss=not args.no_species_loss,
     )
 
 # CUDA_VISIBLE_DEVICES=0 python train.py --lstrings_path "SYMBOLIC_LSTRINGS_d3" --id_cache "symbolic_L" --window 1024 --num_trees 750 --batch 16 --resume p3_effsymbolic_L.pth --epochs 5000 --no_rotation_smoothness --no_position_weights --no_scheduled_sampling --no_truncated_bptt --f_bins 10 --theta_bins 6 --phi_bins 6

@@ -7,7 +7,6 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import torch
 import numpy as np
 import argparse
-import time
 
 from tqdm import tqdm
 from torch.utils.data import DataLoader
@@ -145,30 +144,24 @@ def run_inference(
             continue
             
         # Check Orthophoto
-        # Build all plausible ID variants for lookup:
-        #   tree_01125 -> also try tree_1125 (stripped) and tree_1125 (4-digit if <1000)
-        tid_variants = [tid]
+        # Normalization logic from dataset (tree_1 -> tree_0001)
+        norm_tid = tid
         if "_" in tid:
             parts = tid.split("_")
             try:
                 num = int(parts[1])
-                stripped = f"{parts[0]}_{num}"          # tree_1125 (no leading zeros)
-                padded4  = f"{parts[0]}_{num:04d}"      # tree_1125 (4-digit)
-                padded5  = f"{parts[0]}_{num:05d}"      # tree_01125 (5-digit)
-                for v in [stripped, padded4, padded5]:
-                    if v not in tid_variants:
-                        tid_variants.append(v)
+                if num < 1000: norm_tid = f"{parts[0]}_{num:04d}"
             except: pass
             
         found_ortho = False
         # Check direct files
-        for t in tid_variants:
+        for t in [tid, norm_tid]:
             if os.path.exists(os.path.join(ortho_path_base, f"{t}.png")):
                 found_ortho = True; break
         
         if not found_ortho:
             # Check folders
-            for t in tid_variants:
+            for t in [tid, norm_tid]:
                 p = os.path.join(ortho_path_base, t)
                 if os.path.isdir(p):
                     # Check for any png in folder or rendering subfolder
@@ -370,45 +363,37 @@ def run_inference(
         elif modality == "ortho":
             dsm = torch.zeros_like(dsm)
             
-        # 🔴 FIX: REMOVED redundant Z-axis normalization.
-        # The dataset's __getitem__ already handles all DSM normalization:
-        #   - Basic centering/scaling ALWAYS runs (line 472 in lsys_dataset.py)
-        #   - Strict normalize_to_unit_cube runs only when --normalize is set
-        # Applying ANOTHER normalization here was corrupting the input.
-        # The DSM tensor from the dataloader is already properly preprocessed.
         # Check if we have Ground Truth symbols for evaluation
         has_gt = "type_in" in batch and batch["type_in"] is not None
-        
+
         if has_gt:
             t_in = batch["type_in"].to(device)
             v_in = batch["val_in"].to(device)
             t_tgt = batch["type_tgt"].to(device)
             v_tgt = batch["val_tgt"].to(device)
-            
-        # --- Species Prediction ---
-        with torch.no_grad():
-            mm_out = model.mm(dsm[0:1], ortho[0:1])
-            if isinstance(mm_out, (list, tuple)) and len(mm_out) == 3:
-                v_mem_seq, global_feat, species_logits = mm_out
-                species_id = torch.argmax(species_logits, dim=-1).item()
-                species_name = dataset.inv_species_map.get(species_id, f"ID_{species_id}")
-            else:
-                v_mem_seq, global_feat = mm_out[:2]
-                species_name = "N/A (No Species Head)"
-                
-            gt_species_name = "N/A"
-            if "species" in batch:
-                gt_species_id = batch["species"][0].item()
-                gt_species_name = dataset.inv_species_map.get(gt_species_id, "N/A")
-                
-        print(f"[INFERENCE] [{tid}] Predicted Species: {species_name} (GT: {gt_species_name})")
+
+        gt_species_name = "N/A"
+        if "species" in batch:
+            gt_species_id = batch["species"][0].item()
+            gt_species_name = dataset.inv_species_map.get(gt_species_id, "N/A")
 
         # --- Evaluation Modes ---
         if eval_mode == "teacher":
             if not has_gt:
                 print(f"[WARN] eval_mode='teacher' requested, but no Ground Truth L-Strings found for {tid}. Skipping evaluation metrics.")
                 continue
-                
+
+            # Species prediction (separate mm call needed before teacher-forcing)
+            with torch.no_grad():
+                mm_out = model.mm(dsm[0:1], ortho[0:1])
+                if isinstance(mm_out, (list, tuple)) and len(mm_out) == 3:
+                    species_logits = mm_out[2]
+                    species_id = torch.argmax(species_logits, dim=-1).item()
+                    species_name = dataset.inv_species_map.get(species_id, f"ID_{species_id}")
+                else:
+                    species_name = "N/A (No Species Head)"
+            print(f"[INFERENCE] [{tid}] Predicted Species: {species_name} (GT: {gt_species_name})")
+
             # Use teacher-forcing with chunked BPTT
             chunk_size = bptt_chunk_size or window
             bptt_out = forward_with_truncated_bptt(
@@ -455,28 +440,33 @@ def run_inference(
                 pred_pts = None
                 
         elif eval_mode == "autoregressive":
-            # --- Autoregressive Generation (default) ---
-            t0 = time.time()
-            try:
-                final_types, final_vals = model.pure_inference(
-                    dsm[0:1], ortho[0:1], tokenizer, max_len=window,
-                    temperature=temp, temperature_structural=max(0.3, temp * 0.7),
-                    # max_depth=100
-                )
-                pred_str = tokenizer.decode(final_types[0], final_vals[0])
-            except AttributeError:
-                # Fallback to the legacy text-loop generate if pure_inference is unmodified
-                pred_str = model.generate(
-                    dsm[0:1], ortho[0:1], tokenizer, max_len=window,
-                    temperature=temp, temperature_structural=max(0.3, temp * 0.7),
-                    # max_depth=100
-                )
-            t_gen = time.time() - t0
-            print(f"[TIMING] [{tid}] generate={t_gen:.2f}s  seq_len={len(pred_str)}")
+            # --- Autoregressive Generation (same call as training validation) ---
+            pred_str = model.generate(
+                dsm[0:1], ortho[0:1], tokenizer,
+                max_len=window,
+                temperature=temp,
+                temperature_structural=max(0.3, temp * 0.7),
+            )
 
+            # Extract species from the visual cache set inside generate (avoids a second mm forward)
+            cached = getattr(model, '_pooled_visual_cache', None)
+            if isinstance(cached, torch.Tensor):
+                # train.py: cache stores species_logits directly
+                species_logits = cached
+            elif isinstance(cached, (list, tuple)) and len(cached) >= 3:
+                # train_nospecies.py: cache stores full mm_out tuple
+                species_logits = cached[2]
+            else:
+                species_logits = None
+            if species_logits is not None:
+                species_id = torch.argmax(species_logits, dim=-1).item()
+                species_name = dataset.inv_species_map.get(species_id, f"ID_{species_id}")
+            else:
+                species_name = "N/A (No Species Head)"
+            print(f"[INFERENCE] [{tid}] Predicted Species: {species_name} (GT: {gt_species_name})")
+            
             # Geometry for visualization
             pred_pts = None
-            t1 = time.time()
             if "dsm_center" in batch and "states_tgt" in batch:
                 center = batch["dsm_center"][0].cpu().numpy()
                 scale  = batch["dsm_scale"][0].item()
@@ -488,10 +478,6 @@ def run_inference(
             else:
                 # Fallback purely relative scaling if ground truth states are missing
                 pred_pts = render_lsystem(pred_str, step_scale=1.0, num_bins_theta=theta_bins, num_bins_phi=phi_bins, num_bins_f=f_bins)
-                # Align the generated tree's root from (0,0,0) down to (0,0,-1) to physically match the normalized DSM root 
-                if normalize:
-                    pred_pts += np.array([0, 0, -1.0])
-            print(f"[TIMING] [{tid}] render={time.time()-t1:.2f}s")
         else:
             raise NotImplementedError(f"eval_mode {eval_mode} not implemented")
 
@@ -512,7 +498,7 @@ def run_inference(
         viz.visualize_inference(
             tid=tid,
             ortho=batch["ortho"][0],
-            dsm=dsm[0].cpu(),  # Pass the rigorously strictly normalized GPU tensor, not the raw dataloader batch
+            dsm=batch["dsm"][0],
             gt_pts=gt_pts,
             pred_pts=pred_pts
         )
