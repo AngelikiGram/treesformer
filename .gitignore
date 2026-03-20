@@ -1,4 +1,5 @@
 results/
+# docs/RESULTS/   # <--- allow this folder to be tracked by git
 
 inference_data/*
 
